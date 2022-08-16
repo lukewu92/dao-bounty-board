@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import { BN } from '@project-serum/anchor';
+import { PublicKey } from '@solana/web3.js';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 
-import { DEFAULT_CONFIG } from '../../../api/utils/test-assist/bounty_board';
+import { DUMMY_MINT_PK } from '../../../api/constants';
+import { getRolesInVec, getTiersInVec } from '../../../api/utils/test-assist/bounty_board';
 import { AddButton } from '../../../components/AddButton';
 import { Card } from '../../../components/Card';
 import { H2 } from '../../../components/H2';
@@ -12,7 +15,7 @@ import { Input } from '../../../components/Input';
 import { PrimaryButton } from '../../../components/PrimaryButton';
 import { Select } from '../../../components/Select';
 import { Tag, TagColors } from '../../../components/Tag';
-import { useRealmInfoBySymbol } from '../../../hooks/useRealmInfoBySymbol';
+import { useBountyBoard } from '../../../hooks';
 import { useRouter } from '../../../hooks/useRouter';
 import { BountyTier, RoleSetting } from '../../../model/bounty-board.model';
 
@@ -41,51 +44,6 @@ const defaultTags: TagType[] = [
 ]
 
 const assets = ['usdc', 'sol', 'mngo']
-
-const compensationStructure = [
-  {
-    tier: '',
-    difficulty: 'complex',
-    awards: 2000,
-    asset: 'usdc',
-    skillPoints: 50,
-    reputation: 50,
-    minSkillPoints: 0,
-    minReputation: 0,
-  },
-  {
-    tier: 'aa',
-    difficulty: 'moderate',
-    awards: 50,
-    asset: 'usdc',
-    skillPoints: 50,
-    reputation: 50,
-    minSkillPoints: 0,
-    minReputation: 0,
-  },
-  {
-    tier: 'a',
-    difficulty: 'easy',
-    awards: 50,
-    asset: 'usdc',
-    skillPoints: 50,
-    reputation: 50,
-    minSkillPoints: 0,
-    minReputation: 0,
-  },
-  {
-    tier: 'entry',
-    difficulty: 'first contributor',
-    awards: 50,
-    asset: 'usdc',
-    skillPoints: 50,
-    reputation: 50,
-    minSkillPoints: 0,
-    minReputation: 0,
-  },
-]
-
-const defaultTiers = DEFAULT_CONFIG.tiers as BountyTier[]
 
 const FieldWrapper = ({
   className,
@@ -136,8 +94,8 @@ type FormValue = {
 }
 
 const defaultFormValues = {
-  tiers: DEFAULT_CONFIG.tiers,
-  roles: DEFAULT_CONFIG.roles,
+  tiers: getTiersInVec(new PublicKey(DUMMY_MINT_PK.USDC)) as BountyTier[],
+  roles: getRolesInVec() as RoleSetting[],
 }
 
 const getDefaultValues = () => {
@@ -154,13 +112,47 @@ const getDefaultValues = () => {
       payoutMint,
       payoutReward,
     }) => {
-      val[`tier-${tierName}-difficultyLevel`] = difficultyLevel
-      val[`tier-${tierName}-minRequiredReputation`] = minRequiredReputation
-      val[`tier-${tierName}-minRequiredSkillsPt`] = minRequiredSkillsPt
-      val[`tier-${tierName}-reputationReward`] = reputationReward
-      val[`tier-${tierName}-skillsPtReward`] = skillsPtReward
-      // defaultValues[`${tierName}-payoutMint`] = payoutMint
-      val[`tier-${tierName}-payoutReward`] = payoutReward
+      val[`tiers-${tierName}-difficultyLevel`] = difficultyLevel
+      val[`tiers-${tierName}-minRequiredReputation`] = minRequiredReputation
+      val[`tiers-${tierName}-minRequiredSkillsPt`] = minRequiredSkillsPt
+      val[`tiers-${tierName}-reputationReward`] = reputationReward
+      val[`tiers-${tierName}-skillsPtReward`] = skillsPtReward
+      val[`tiers-${tierName}-payoutMint`] = payoutMint
+      val[`tiers-${tierName}-payoutReward`] = payoutReward
+    },
+  )
+
+  defaultFormValues.roles.forEach(
+    ({ roleName, permissions, default: isDefault }) => {
+      val[`roles-${roleName}-default`] = isDefault
+      val[`roles-${roleName}-createBounty`] = recordExist(
+        permissions,
+        'createBounty',
+      )
+      val[`roles-${roleName}-updateBounty`] = recordExist(
+        permissions,
+        'updateBounty',
+      )
+      val[`roles-${roleName}-deleteBounty`] = recordExist(
+        permissions,
+        'deleteBounty',
+      )
+      val[`roles-${roleName}-assignBounty`] = recordExist(
+        permissions,
+        'assignBounty',
+      )
+      val[`roles-${roleName}-requestChangeToSubmission`] = recordExist(
+        permissions,
+        'requestChangeToSubmission',
+      )
+      val[`roles-${roleName}-acceptSubmission`] = recordExist(
+        permissions,
+        'acceptSubmission',
+      )
+      val[`roles-${roleName}-rejectSubmission`] = recordExist(
+        permissions,
+        'rejectSubmission',
+      )
     },
   )
 
@@ -168,17 +160,54 @@ const getDefaultValues = () => {
 }
 
 const recordExist = (records: any, search: string) =>
-  (Object.keys(records) as Array<any>).find((key) => records[key] === search)
+  Boolean(records.find((k) => k[search]))
 
-export const ProposeBountyBoard = () => {
-  const { symbol } = useRouter()
-  const { realmInfo } = useRealmInfoBySymbol(symbol)
+interface IProposeBountyBoard {
+  realmId: PublicKey
+}
+
+export const ProposeBountyBoard = ({ realmId }: IProposeBountyBoard) => {
+  const { symbol, push } = useRouter()
   const [tiers, setTiers] = useState<BountyTier[]>(defaultFormValues.tiers)
+  const [roles, setRoles] = useState<RoleSetting[]>(defaultFormValues.roles)
+  const [members, setMembers] = useState<any>({})
   // const [confirming, setConfirming] = useState(false)
   const [confirmedValues, setConfirmedValues] = useState<any>(undefined)
   const confirming = Boolean(confirmedValues)
 
+  const { proposeInitBountyBoard } = useBountyBoard(realmId)
+
   const [tags, setTags] = useState<TagType[]>(defaultTags)
+
+  const addMember = ({
+    roleName,
+    address,
+  }: {
+    roleName: string
+    address: string
+  }) => {
+    const memberValues = [...(members?.[roleName] || []), address]
+    setMembers((prev) => ({
+      ...prev,
+      [roleName]: memberValues,
+    }))
+  }
+
+  const removeMember = ({
+    roleName,
+    address,
+  }: {
+    roleName: string
+    address: string
+  }) => {
+    const memberValues = Array(members?.[roleName] || []).filter(
+      (a) => a !== address,
+    )
+    setMembers((prev) => ({
+      ...prev,
+      [roleName]: memberValues,
+    }))
+  }
 
   const defaultValues = getDefaultValues()
   const methods = useForm<any>({
@@ -188,15 +217,62 @@ export const ProposeBountyBoard = () => {
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     methods.handleSubmit((data) => {
-      console.log('send values', data)
+      // Construct tier values
+      const tierValues = {}
+      const tierFieldNames = Object.keys(data).filter(
+        (key) => key.split('-')[0] === 'tiers',
+      )
+      tierFieldNames.forEach((name) => {
+        const tierName = name.split('-')[1]
+        const propertyName = name.split('-')[2]
+        tierValues[tierName] = { ...(tierValues[tierName] || {}) }
+        tierValues[tierName][propertyName] = data[name]
+      })
+      const tiers = Object.keys(tierValues).map((key) => ({
+        tierName: key,
+        ...tierValues[key],
+      }))
+
+      // Construct role values
+      const roleValues = {}
+      const roleFieldNames = Object.keys(data).filter(
+        (key) => key.split('-')[0] === 'roles',
+      )
+      roleFieldNames.forEach((name) => {
+        const roleName = name.split('-')[1]
+        const propertyName = name.split('-')[2]
+        roleValues[roleName] = { ...(roleValues[roleName] || {}) }
+        if (data[name]) {
+          roleValues[roleName]['permissions'] = [
+            ...(roleValues[roleName]['permissions'] || []),
+            { [propertyName]: {} },
+          ]
+        }
+      })
+      const roles = Object.keys(roleValues).map((key) => ({
+        roleName: key,
+        default: data[`roles-${key}-default`],
+        permissions: roleValues[key]['permissions'],
+      }))
+
+      const lastRevised = new BN(new Date().getTime() / 1000)
+
+      const payload = {
+        boardConfig: {
+          tiers: tiers as BountyTier[],
+          roles: roles as RoleSetting[],
+          lastRevised: lastRevised as BN,
+        },
+        fundingAmount: 1000,
+        initialContributorsWithRole: [],
+      }
+      // proposeInitBountyBoard(payload)
+      push(`/dao/${symbol}/bounty-board`)
     })()
   }
 
-  // console.log(watch('EntrypayoutReward'))
-
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault()
-    // console.log('name,', e.currentTarget.name)
     methods.setValue(e.currentTarget.name, Number(e.currentTarget.value))
   }
 
@@ -206,10 +282,6 @@ export const ProposeBountyBoard = () => {
 
   const confirm = () => {
     methods.handleSubmit((data) => {
-      const tierKeys = Object.keys(data).filter(
-        (key) => key.split('-')?.[0] === 'tier',
-      )
-      console.log('tierKeys', tierKeys)
       setConfirmedValues(data)
     })()
   }
@@ -270,19 +342,19 @@ export const ProposeBountyBoard = () => {
                             className="w-1/2 text-right rounded-tr-none rounded-br-none"
                             prefix="$"
                             defaultValue={payoutReward}
-                            name={`tier-${tierName}-payoutReward`}
+                            name={`tiers-${tierName}-payoutReward`}
                             onChange={onChange}
                             disabled={confirming}
                           />
 
                           <Select
-                            // name={`${tierName}-asset`}
+                            name={`tiers-${tierName}-payoutMint`}
                             className="w-1/2 rounded-tl-none rounded-bl-none"
                             disabled={confirming}
                           >
-                            {assets?.map((asset) => (
-                              <option key={asset} value={asset}>
-                                {asset}
+                            {Object.keys(DUMMY_MINT_PK)?.map((key) => (
+                              <option key={key} value={DUMMY_MINT_PK[key]}>
+                                {key}
                               </option>
                             ))}
                           </Select>
@@ -294,7 +366,7 @@ export const ProposeBountyBoard = () => {
                             className="w-1/2 text-right rounded outline outline-1 outline-white/20 flex-shrink-0"
                             prefixLogo={<Suitcase />}
                             defaultValue={skillsPtReward}
-                            name={`tier-${tierName}-skillsPtReward`}
+                            name={`tiers-${tierName}-skillsPtReward`}
                             onChange={onChange}
                             disabled={confirming}
                           />
@@ -308,7 +380,7 @@ export const ProposeBountyBoard = () => {
                             className="w-1/2 text-right rounded outline outline-1 outline-white/20 flex-shrink-0"
                             prefixLogo={<Badge />}
                             defaultValue={reputationReward}
-                            name={`tier-${tierName}-reputationReward`}
+                            name={`tiers-${tierName}-reputationReward`}
                             onChange={onChange}
                             disabled={confirming}
                           />
@@ -323,7 +395,7 @@ export const ProposeBountyBoard = () => {
                               className="w-1/2 text-right rounded outline outline-1 outline-white/20 flex-shrink-0"
                               prefixLogo={<Suitcase />}
                               defaultValue={minRequiredSkillsPt}
-                              name={`tier-${tierName}-minRequiredSkillsPt`}
+                              name={`tiers-${tierName}-minRequiredSkillsPt`}
                               disabled={confirming}
                             />
 
@@ -337,7 +409,7 @@ export const ProposeBountyBoard = () => {
                             className={`w-1/2 text-right rounded outline outline-1 outline-white/20 flex-shrink-0`}
                             prefixLogo={<Badge />}
                             defaultValue={minRequiredReputation}
-                            name={`tier-${tierName}-minRequiredReputation`}
+                            name={`tiers-${tierName}-minRequiredReputation`}
                             disabled={confirming}
                           />
 
@@ -364,13 +436,17 @@ export const ProposeBountyBoard = () => {
                     {l}
                   </span>
                 ))}
-                {defaultFormValues.roles.map(
-                  ({ roleName, permissions }, index) => {
-                    console.log('permissions', permissions)
+                {roles.map(
+                  ({ roleName, permissions, default: isDefault }, index) => {
                     return (
                       <React.Fragment key={roleName}>
-                        <div className="text-base flex font-medium text-tnight-200">
-                          {roleName}
+                        <div className="text-base flex font-medium text-tnight-200 gap-2">
+                          <span>{roleName}</span>
+                          {isDefault && (
+                            <span className="py-1 px-1.5 rounded bg-tag-bg text-tag-text font-medium text-sm h-fit">
+                              Default
+                            </span>
+                          )}
                         </div>
                         <div className="flex flex-col gap-2">
                           <span className="font-medium text-tnight-200">
@@ -378,23 +454,42 @@ export const ProposeBountyBoard = () => {
                           </span>
                           <Checkbox
                             disabled={confirming}
-                            name={`role-${roleName}-createBounty`}
+                            name={`roles-${roleName}-createBounty`}
                             label="Create Bounty"
-                            checked={recordExist(permissions, 'createBounty')}
+                            defaultChecked={recordExist(
+                              permissions,
+                              'createBounty',
+                            )}
                             onChange={onSelect}
                           />
                           <Checkbox
                             disabled={confirming}
-                            name={`role-${roleName}-deleteBounty`}
+                            name={`roles-${roleName}-updateBounty`}
+                            label="Update Bounty"
+                            defaultChecked={recordExist(
+                              permissions,
+                              'updateBounty',
+                            )}
+                            onChange={onSelect}
+                          />
+                          <Checkbox
+                            disabled={confirming}
+                            name={`roles-${roleName}-deleteBounty`}
                             label="Delete Bounty"
-                            checked={recordExist(permissions, 'deleteBounty')}
+                            defaultChecked={recordExist(
+                              permissions,
+                              'deleteBounty',
+                            )}
                             onChange={onSelect}
                           />
                           <Checkbox
                             disabled={confirming}
-                            name={`role-${roleName}-assignBounty`}
+                            name={`roles-${roleName}-assignBounty`}
                             label="Assign Bounty"
-                            checked={recordExist(permissions, 'assignBounty')}
+                            defaultChecked={recordExist(
+                              permissions,
+                              'assignBounty',
+                            )}
                             onChange={onSelect}
                           />
                         </div>
@@ -404,9 +499,9 @@ export const ProposeBountyBoard = () => {
                           </span>
                           <Checkbox
                             disabled={confirming}
-                            name={`role-${roleName}-acceptSubmission`}
+                            name={`roles-${roleName}-acceptSubmission`}
                             label="Accept"
-                            checked={recordExist(
+                            defaultChecked={recordExist(
                               permissions,
                               'acceptSubmission',
                             )}
@@ -414,9 +509,9 @@ export const ProposeBountyBoard = () => {
                           />
                           <Checkbox
                             disabled={confirming}
-                            name={`role-${roleName}-rejectSubmission`}
+                            name={`roles-${roleName}-rejectSubmission`}
                             label="Reject"
-                            checked={recordExist(
+                            defaultChecked={recordExist(
                               permissions,
                               'rejectSubmission',
                             )}
@@ -424,9 +519,9 @@ export const ProposeBountyBoard = () => {
                           />
                           <Checkbox
                             disabled={confirming}
-                            name={`role-${roleName}-requestChangeToSubmission`}
+                            name={`roles-${roleName}-requestChangeToSubmission`}
                             label="Request Changes"
-                            checked={recordExist(
+                            defaultChecked={recordExist(
                               permissions,
                               'requestChangeToSubmission',
                             )}
@@ -443,7 +538,9 @@ export const ProposeBountyBoard = () => {
                                 <span className=" text-ellipsis overflow-hidden whitespace-nowrap">
                                   {address}
                                 </span>
-                                <Close className=" text-base text-text-secondary flex-shrink-0" />
+                                {!confirming && (
+                                  <Close className="text-base text-text-secondary flex-shrink-0 cursor-pointer hover:text-text-primary" />
+                                )}
                               </div>
                             ))}
                           </div>
